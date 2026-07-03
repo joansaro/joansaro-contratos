@@ -1,0 +1,216 @@
+/* Joansaro Design System — implemented from ds/colors_and_type.css */
+:root {
+  --jo-bg: #ffffff;
+  --jo-surface: #fafafa;
+  --jo-surface-elevated: #ffffff;
+  --jo-border: #e5e5e5;
+  --jo-border-strong: #d4d4d4;
+  --jo-fg: #0a0a0a;
+  --jo-fg-secondary: #525252;
+  --jo-fg-tertiary: #a3a3a3;
+  --jo-accent: #18181b;
+  --jo-accent-hover: #27272a;
+  --jo-accent-press: #3f3f46;
+  --jo-accent-fg: #ffffff;
+  --jo-success: #16a34a;
+  --jo-warning: #ca8a04;
+  --jo-danger: #dc2626;
+  --jo-info: #2563eb;
+  --jo-radius-sm: 6px;
+  --jo-radius-md: 8px;
+  --jo-radius-lg: 12px;
+  --jo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --jo-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --jo-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --jo-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --jo-transition: all 150ms var(--jo-ease);
+  --jo-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --jo-font-script-1: 'Caveat', cursive;
+  --jo-font-script-2: 'Dancing Script', cursive;
+  --jo-font-script-3: 'Allura', cursive;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--jo-bg);
+  min-height: 100%;
+  font-family: var(--jo-font-sans);
+  color: var(--jo-fg);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: inherit; text-decoration: none; }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #e5e5e5; border-radius: 8px; border: 2px solid #fff; }
+*::-webkit-scrollbar-thumb:hover { background: #d4d4d4; }
+
+/* ---------- Type roles ---------- */
+.jo-display { font: 600 32px/40px var(--jo-font-sans); letter-spacing: -0.02em; }
+.jo-h1 { font: 600 24px/32px var(--jo-font-sans); letter-spacing: -0.01em; }
+.jo-h2 { font: 600 18px/28px var(--jo-font-sans); letter-spacing: -0.01em; }
+.jo-body-l { font: 400 16px/24px var(--jo-font-sans); }
+.jo-body { font: 400 14px/20px var(--jo-font-sans); }
+.jo-caption { font: 400 13px/18px var(--jo-font-sans); color: var(--jo-fg-secondary); }
+.jo-micro { font: 500 12px/16px var(--jo-font-sans); letter-spacing: 0.01em; }
+
+/* ---------- Button ---------- */
+.jo-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--jo-radius-sm);
+  font: 500 14px var(--jo-font-sans);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--jo-transition);
+  border: 1px solid transparent;
+  text-decoration: none;
+}
+.jo-btn:disabled { background: #fafafa !important; color: #a3a3a3 !important; cursor: not-allowed; border-color: #e5e5e5 !important; }
+.jo-btn-sm { height: 32px; padding: 0 12px; font-size: 13px; }
+.jo-btn-lg { height: 40px; padding: 0 16px; }
+.jo-btn-primary { background: var(--jo-accent); color: var(--jo-accent-fg); }
+.jo-btn-primary:hover:not(:disabled) { background: var(--jo-accent-hover); }
+.jo-btn-secondary { background: #fff; color: var(--jo-fg); border-color: var(--jo-border); }
+.jo-btn-secondary:hover:not(:disabled) { background: var(--jo-surface); }
+.jo-btn-ghost { background: transparent; color: var(--jo-fg); }
+.jo-btn-ghost:hover:not(:disabled) { background: #f5f5f5; }
+.jo-btn-danger { background: #fff; color: var(--jo-danger); border-color: var(--jo-border); }
+.jo-btn-danger:hover:not(:disabled) { background: #fef2f2; }
+
+/* ---------- Badge ---------- */
+.jo-badge {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  font: 500 12px var(--jo-font-sans);
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.jo-badge-DRAFT { background: #f5f5f5; color: #525252; }
+.jo-badge-SENT { background: #eff6ff; color: #2563eb; }
+.jo-badge-VIEWED { background: #fefce8; color: #ca8a04; }
+.jo-badge-SIGNED { background: #f0fdf4; color: #16a34a; }
+.jo-badge-DECLINED { background: #fef2f2; color: #dc2626; }
+.jo-badge-EXPIRED { background: #f5f5f5; color: #a3a3a3; }
+
+/* ---------- Input ---------- */
+.jo-input, .jo-textarea, .jo-select {
+  width: 100%;
+  padding: 0 12px;
+  font: 400 14px var(--jo-font-sans);
+  color: var(--jo-fg);
+  background: #fff;
+  border: 1px solid var(--jo-border);
+  border-radius: var(--jo-radius-sm);
+  outline: none;
+  transition: var(--jo-transition);
+}
+.jo-input, .jo-select { height: 36px; }
+.jo-textarea { padding: 10px 12px; line-height: 20px; resize: vertical; }
+.jo-input:focus, .jo-textarea:focus, .jo-select:focus {
+  border-color: var(--jo-accent);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--jo-accent);
+}
+.jo-input::placeholder, .jo-textarea::placeholder { color: var(--jo-fg-tertiary); }
+.jo-label { display: block; font: 500 13px/18px var(--jo-font-sans); color: var(--jo-fg); margin-bottom: 6px; }
+.jo-field-error { font: 400 13px/18px var(--jo-font-sans); color: var(--jo-danger); margin-top: 6px; }
+
+/* ---------- Card ---------- */
+.jo-card {
+  background: #fff;
+  border: 1px solid var(--jo-border);
+  border-radius: var(--jo-radius-md);
+}
+
+/* ---------- Table ---------- */
+.jo-table { width: 100%; border-collapse: collapse; }
+.jo-table th {
+  text-align: left;
+  font: 500 12px/16px var(--jo-font-sans);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--jo-fg-tertiary);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--jo-border);
+  background: var(--jo-surface);
+}
+.jo-table td { padding: 14px 16px; border-bottom: 1px solid var(--jo-border); }
+.jo-table tr:last-child td { border-bottom: none; }
+.jo-row-link { transition: var(--jo-transition); cursor: pointer; }
+.jo-row-link:hover { background: var(--jo-surface); }
+
+/* ---------- Document page (contract canvas) ---------- */
+.jo-doc-page {
+  position: relative;
+  width: 100%;
+  max-width: 816px;
+  aspect-ratio: 816 / 1056;
+  background: #fff;
+  border: 1px solid var(--jo-border);
+  border-radius: 4px;
+  box-shadow: var(--jo-shadow-md);
+  margin: 0 auto;
+  overflow: hidden;
+}
+.jo-doc-inner { position: absolute; inset: 0; padding: 7% 9%; overflow: hidden; }
+.jo-doc-title { font: 600 22px/30px var(--jo-font-sans); letter-spacing: -0.01em; margin: 0 0 18px; }
+.jo-doc-section { font: 600 14px/20px var(--jo-font-sans); margin: 16px 0 6px; }
+.jo-doc-p { font: 400 12.5px/19px var(--jo-font-sans); color: #404040; margin: 0 0 10px; white-space: pre-wrap; }
+
+/* Placed fields */
+.jo-field-box {
+  position: absolute;
+  border: 1.5px dashed var(--jo-border-strong);
+  border-radius: 4px;
+  background: rgba(250, 250, 250, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: 500 12px var(--jo-font-sans);
+  color: var(--jo-fg-secondary);
+  transition: border-color 150ms var(--jo-ease), background 150ms var(--jo-ease);
+}
+.jo-field-box.selected { border-color: var(--jo-accent); border-style: solid; background: #fff; box-shadow: var(--jo-shadow-sm); }
+.jo-field-box.fillable { border-color: var(--jo-info); background: #eff6ff; color: var(--jo-info); cursor: pointer; }
+.jo-field-box.fillable:hover { background: #dbeafe; }
+.jo-field-box.filled { border-color: var(--jo-success); border-style: solid; background: #fff; color: var(--jo-fg); }
+
+/* ---------- Modal ---------- */
+.jo-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 24px;
+}
+.jo-modal {
+  background: #fff;
+  border-radius: var(--jo-radius-lg);
+  box-shadow: var(--jo-shadow-lg);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+/* ---------- Misc ---------- */
+.jo-divider { height: 1px; background: var(--jo-border); border: none; margin: 0; }
+.jo-focusable:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--jo-accent); }
+.jo-spin { animation: jo-spin 0.7s linear infinite; }
+@keyframes jo-spin { to { transform: rotate(360deg); } }

@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  createdAt    DateTime   @default(now())
+  documents    Document[]
+  templates    Template[]
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  ownerId   String?
+  title     String
+  content   String // plain text; blank line = new paragraph, lines ending with ':' = section titles
+  createdAt DateTime @default(now())
+  owner     User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  ownerId    String
+  title      String
+  content    String // same convention as Template.content
+  sourceType String   @default("blank") // blank | template | pdf
+  pdfPath    String?
+  status      String  @default("DRAFT") // DRAFT | SENT | VIEWED | SIGNED | DECLINED
+  contentHash String? // sha256 of content/pdf at send time (tamper evidence)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  owner  User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fields Field[]
+  signer Signer?
+  events Event[]
+}
+
+model Field {
+  id         String  @id @default(cuid())
+  documentId String
+  type       String // signature | date | text | checkbox
+  x          Float // percentage 0–100 of page width
+  y          Float // percentage 0–100 of page height
+  w          Float // percentage of page width
+  h          Float // percentage of page height
+  required   Boolean @default(true)
+  value      String? // filled by the signer (JSON for signature)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model Signer {
+  id          String    @id @default(cuid())
+  documentId  String    @unique
+  name        String
+  email       String
+  token       String    @unique
+  message     String?
+  sentAt      DateTime?
+  viewedAt    DateTime?
+  signedAt    DateTime?
+  declinedAt  DateTime?
+  declineNote String?
+  viewedIp    String?
+  viewedUa    String?
+  signedIp    String?
+  signedUa    String?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model Event {
+  id         String   @id @default(cuid())
+  documentId String
+  type       String // created | prepared | sent | viewed | signed | declined | reminder
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}

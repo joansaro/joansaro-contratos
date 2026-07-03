@@ -1,0 +1,10 @@
+node_modules/
+.next/
+dist/
+*.db
+*.db-journal
+.env*.local
+public/uploads/*
+!public/uploads/.gitkeep
+.env
+!.env.example
