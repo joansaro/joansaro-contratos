@@ -25,6 +25,17 @@ interface DocInfo {
 
 type Step = 'welcome' | 'review' | 'done' | 'declined';
 
+export interface ReadonlyField {
+  id: string;
+  type: 'signature' | 'date' | 'text' | 'checkbox';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  page: number;
+  value: string | null;
+}
+
 export function SignerFlow(props: {
   token: string;
   signerName: string;
@@ -32,10 +43,15 @@ export function SignerFlow(props: {
   message: string | null;
   alreadySigned: boolean;
   declined: boolean;
+  blocked: 'voided' | 'expired' | 'declined-other' | null;
+  waitingFor: string | null;
+  totalSigners: number;
+  slot: number;
   doc: DocInfo;
   fields: SignerField[];
+  otherFields: ReadonlyField[];
 }) {
-  const { token, signerName, senderName, message, doc, fields } = props;
+  const { token, signerName, senderName, message, doc, fields, otherFields, blocked, waitingFor } = props;
   const [step, setStep] = useState<Step>(
     props.alreadySigned ? 'done' : props.declined ? 'declined' : 'welcome',
   );
@@ -82,6 +98,50 @@ export function SignerFlow(props: {
   };
 
   // ---------- Screens ----------
+
+  // ---------- Blocked states: voided / expired / waiting turn ----------
+  if (blocked === 'voided') {
+    return (
+      <CenterShell>
+        <h1 className="jo-h1" style={{ margin: '0 0 8px' }}>Document voided</h1>
+        <p className="jo-body" style={{ color: 'var(--jo-fg-secondary)' }}>
+          {senderName} has voided \u201C{doc.title}\u201D. No action is needed on your side.
+        </p>
+      </CenterShell>
+    );
+  }
+  if (blocked === 'expired') {
+    return (
+      <CenterShell>
+        <h1 className="jo-h1" style={{ margin: '0 0 8px' }}>Link expired</h1>
+        <p className="jo-body" style={{ color: 'var(--jo-fg-secondary)' }}>
+          The signing window for \u201C{doc.title}\u201D has closed. Ask {senderName} to send you a new link.
+        </p>
+      </CenterShell>
+    );
+  }
+  if (blocked === 'declined-other') {
+    return (
+      <CenterShell>
+        <h1 className="jo-h1" style={{ margin: '0 0 8px' }}>Signing stopped</h1>
+        <p className="jo-body" style={{ color: 'var(--jo-fg-secondary)' }}>
+          Another party declined \u201C{doc.title}\u201D, so it is no longer open for signing.
+        </p>
+      </CenterShell>
+    );
+  }
+  if (waitingFor) {
+    return (
+      <CenterShell>
+        <h1 className="jo-h1" style={{ margin: '0 0 8px' }}>Not your turn yet</h1>
+        <p className="jo-body" style={{ color: 'var(--jo-fg-secondary)' }}>
+          \u201C{doc.title}\u201D is being signed in order. We are waiting for <strong>{waitingFor}</strong> to
+          sign first \u2014 you will get an email as soon as it is your turn.
+        </p>
+      </CenterShell>
+    );
+  }
+
 
   if (step === 'welcome') {
     return (
@@ -212,6 +272,19 @@ export function SignerFlow(props: {
               <ContractBody content={doc.content} />
             </div>
           )}
+
+          {otherFields
+            .filter((f) => f.page === 1)
+            .map((f) => (
+              <div
+                key={f.id}
+                className={`jo-field-box${f.value ? ' filled' : ''}`}
+                style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, height: `${f.h}%`, opacity: 0.65 }}
+                title="Assigned to another signer"
+              >
+                <FieldContent type={f.type} value={f.value} />
+              </div>
+            ))}
 
           {fields.map((f) => {
             const filled = Boolean(values[f.id]);

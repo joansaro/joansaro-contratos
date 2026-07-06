@@ -5,11 +5,13 @@ import { Icon } from '@/components/icons';
 
 const TABS = [
   { id: 'all', label: 'All' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'draft', label: 'Drafts' },
   { id: 'sent', label: 'Sent' },
-  { id: 'viewed', label: 'Viewed' },
+  { id: 'partially_signed', label: 'Partial' },
   { id: 'signed', label: 'Signed' },
   { id: 'declined', label: 'Declined' },
+  { id: 'voided', label: 'Voided' },
+  { id: 'expired', label: 'Expired' },
 ];
 
 export function FilterBar({ counts }: { counts: Record<string, number> }) {

@@ -88,8 +88,9 @@ async function main() {
           { type: 'date', x: 62, y: 78, w: 22, h: 5, value: new Date().toLocaleDateString('en-US') },
         ],
       },
-      signer: {
+      signers: {
         create: {
+          slot: 1,
           name: 'Sarah Johnson',
           email: 'sarah@example.com',
           token: mkToken(),
@@ -115,12 +116,13 @@ async function main() {
       title: 'Product Photography NDA',
       content: TPL_NDA,
       sourceType: 'template',
-      status: 'VIEWED',
+      status: 'SENT',
       fields: {
         create: [{ type: 'signature', x: 8, y: 80, w: 30, h: 7 }],
       },
-      signer: {
+      signers: {
         create: {
+          slot: 1,
           name: 'Emma Rodriguez',
           email: 'emma@example.com',
           token: mkToken(),

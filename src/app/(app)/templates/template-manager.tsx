@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   createFromTemplateAction,
   createTemplateAction,
@@ -20,10 +21,8 @@ export function TemplateManager({ templates }: { templates: TemplateItem[] }) {
   const [modal, setModal] = useState<null | { mode: 'create' } | { mode: 'edit'; tpl: TemplateItem }>(null);
   const [pending, startTransition] = useTransition();
 
-  const useTpl = (id: string) =>
-    startTransition(async () => {
-      await createFromTemplateAction(id);
-    });
+  const router = useRouter();
+  const useTpl = (id: string) => router.push(`/templates/use/${id}`);
 
   const del = (tpl: TemplateItem) => {
     if (!window.confirm(`Delete template “${tpl.title}”?`)) return;

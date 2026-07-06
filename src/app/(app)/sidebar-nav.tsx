@@ -8,6 +8,7 @@ const ITEMS = [
   { href: '/dashboard', icon: 'fileText', label: 'Documents' },
   { href: '/templates', icon: 'template', label: 'Templates' },
   { href: '/clients', icon: 'users', label: 'Clients' },
+  { href: '/outbox', icon: 'send', label: 'Outbox' },
 ] as const;
 
 export function SidebarNav() {

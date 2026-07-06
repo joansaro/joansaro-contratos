@@ -15,6 +15,7 @@ model User {
   createdAt    DateTime   @default(now())
   documents    Document[]
   templates    Template[]
+  contacts     Contact[]
 }
 
 model Template {
@@ -33,15 +34,18 @@ model Document {
   content    String // same convention as Template.content
   sourceType String   @default("blank") // blank | template | pdf
   pdfPath    String?
-  status      String  @default("DRAFT") // DRAFT | SENT | VIEWED | SIGNED | DECLINED
-  contentHash String? // sha256 of content/pdf at send time (tamper evidence)
+  // DRAFT | SENT | PARTIALLY_SIGNED | SIGNED | DECLINED | VOIDED | EXPIRED
+  status       String    @default("DRAFT")
+  signingOrder String    @default("sequential") // sequential | parallel
+  expiresAt    DateTime?
+  contentHash  String? // sha256 of content/pdf at send time (tamper evidence)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  owner  User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  fields Field[]
-  signer Signer?
-  events Event[]
+  owner   User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fields  Field[]
+  signers Signer[]
+  events  Event[]
 }
 
 model Field {
@@ -53,6 +57,8 @@ model Field {
   w          Float // percentage of page width
   h          Float // percentage of page height
   required   Boolean @default(true)
+  slot       Int     @default(1) // which signer (1-based) fills this field
+  page       Int     @default(1) // page number for uploaded PDFs
   value      String? // filled by the signer (JSON for signature)
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -60,7 +66,8 @@ model Field {
 
 model Signer {
   id          String    @id @default(cuid())
-  documentId  String    @unique
+  documentId  String
+  slot        Int       @default(1) // signing order position (1-based)
   name        String
   email       String
   token       String    @unique
@@ -76,6 +83,9 @@ model Signer {
   signedUa    String?
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, slot])
+  @@index([documentId])
 }
 
 model Event {
@@ -86,4 +96,26 @@ model Event {
   createdAt  DateTime @default(now())
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// Directorio de contactos del dueño (autocompletar al enviar)
+model Contact {
+  id        String   @id @default(cuid())
+  ownerId   String
+  name      String
+  email     String
+  notes     String?
+  createdAt DateTime @default(now())
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, email])
+}
+
+// Bandeja de salida demo: los emails que la app "envía"
+model OutboxEmail {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  createdAt DateTime @default(now())
 }

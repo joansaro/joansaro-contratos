@@ -28,9 +28,23 @@ export default async function DashboardPage({ searchParams }: DashboardProps) {
 
   const docs = await db.document.findMany({
     where: { ownerId: user.id },
-    include: { signer: true },
+    include: { signers: { orderBy: { slot: 'asc' } } },
     orderBy: { updatedAt: 'desc' },
   });
+
+  // Métricas: tiempo medio a firma completa y tasa de finalización
+  const sent = docs.filter((d) => d.status !== 'DRAFT');
+  const signedDocs = docs.filter((d) => d.status === 'SIGNED');
+  const avgHours = (() => {
+    const spans = signedDocs
+      .map((d) => {
+        const sentAt = d.signers.map((sg) => sg.sentAt).filter(Boolean).sort()[0];
+        const lastSig = d.signers.map((sg) => sg.signedAt).filter(Boolean).sort().at(-1);
+        return sentAt && lastSig ? (lastSig.getTime() - sentAt.getTime()) / 3600e3 : null;
+      })
+      .filter((x): x is number => x !== null);
+    return spans.length ? spans.reduce((a, b) => a + b, 0) / spans.length : null;
+  })();
 
   const counts: Record<string, number> = { ALL: docs.length };
   for (const d of docs) counts[d.status] = (counts[d.status] ?? 0) + 1;
@@ -38,7 +52,7 @@ export default async function DashboardPage({ searchParams }: DashboardProps) {
   const filtered = docs.filter((d) => {
     if (tab !== 'ALL' && d.status !== tab) return false;
     if (q) {
-      const hay = `${d.title} ${d.signer?.name ?? ''}`.toLowerCase();
+      const hay = `${d.title} ${d.signers.map((sg) => `${sg.name} ${sg.email}`).join(' ')}`.toLowerCase();
       if (!hay.includes(q.toLowerCase())) return false;
     }
     return true;
@@ -57,6 +71,27 @@ export default async function DashboardPage({ searchParams }: DashboardProps) {
         <Link href="/documents/new" className="jo-btn jo-btn-primary">
           <Icon name="plus" size={15} /> New document
         </Link>
+      </div>
+
+      {/* Métricas rápidas */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
+        {[
+          { label: 'In progress', value: String((counts['SENT'] ?? 0) + (counts['PARTIALLY_SIGNED'] ?? 0)) },
+          { label: 'Fully signed', value: String(counts['SIGNED'] ?? 0) },
+          {
+            label: 'Completion rate',
+            value: sent.length ? `${Math.round((signedDocs.length / sent.length) * 100)}%` : '—',
+          },
+          {
+            label: 'Avg. time to sign',
+            value: avgHours === null ? '—' : avgHours < 48 ? `${Math.round(avgHours)}h` : `${(avgHours / 24).toFixed(1)}d`,
+          },
+        ].map((stat) => (
+          <div key={stat.label} className="jo-card" style={{ padding: '14px 16px' }}>
+            <div className="jo-micro" style={{ textTransform: 'uppercase', color: 'var(--jo-fg-tertiary)' }}>{stat.label}</div>
+            <div style={{ font: '600 22px var(--jo-font-sans)', marginTop: 2 }}>{stat.value}</div>
+          </div>
+        ))}
       </div>
 
       <FilterBar counts={counts} />
@@ -101,8 +136,8 @@ export default async function DashboardPage({ searchParams }: DashboardProps) {
                         <Icon name="fileText" size={16} style={{ color: 'var(--jo-fg-tertiary)', flexShrink: 0 }} />
                         {d.title}
                       </span>
-                      <span style={{ padding: '14px 16px', color: 'var(--jo-fg-secondary)' }}>
-                        {d.signer?.name ?? '—'}
+                      <span style={{ padding: '14px 16px', color: 'var(--jo-fg-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {d.signers.length > 0 ? d.signers.map((sg) => sg.name).join(', ') : '—'}
                       </span>
                       <span style={{ padding: '14px 16px' }}>
                         <Badge status={d.status} />

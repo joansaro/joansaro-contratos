@@ -10,7 +10,9 @@ import * as bcrypt from 'bcryptjs';
 import { z } from 'zod';
 
 import { db } from './db';
+import { extractTemplateVars } from './template-vars';
 import { createSession, destroySession, requireUser } from './auth';
+import { mail } from './mail';
 
 // ============================== AUTH ==============================
 
@@ -81,6 +83,35 @@ export async function createBlankDocumentAction(formData: FormData): Promise<voi
   redirect(`/documents/${doc.id}/prepare`);
 }
 
+/** Crea un documento desde plantilla rellenando variables {{x}} desde el form. */
+export async function createFromTemplateWithVarsAction(
+  templateId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const tpl = await db.template.findFirst({
+    where: { id: templateId, OR: [{ ownerId: user.id }, { ownerId: null }] },
+  });
+  if (!tpl) redirect('/templates');
+
+  let content = tpl.content;
+  for (const name of extractTemplateVars(tpl.content)) {
+    const value = String(formData.get(`var:${name}`) ?? '').trim() || `{{${name}}}`;
+    content = content.replaceAll(new RegExp(`\\{\\{\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'g'), value);
+  }
+
+  const doc = await db.document.create({
+    data: {
+      ownerId: user.id,
+      title: String(formData.get('title') ?? '').trim().slice(0, 160) || tpl.title,
+      content,
+      sourceType: 'template',
+      events: { create: [{ type: 'created', detail: `Created from template \u201C${tpl.title}\u201D` }] },
+    },
+  });
+  redirect(`/documents/${doc.id}/prepare`);
+}
+
 export async function createFromTemplateAction(templateId: string): Promise<void> {
   const user = await requireUser();
   const tpl = await db.template.findUnique({ where: { id: templateId } });
@@ -138,6 +169,8 @@ const FieldSchema = z.object({
   y: z.number().min(0).max(100),
   w: z.number().min(1).max(100),
   h: z.number().min(1).max(100),
+  slot: z.number().int().min(1).max(5).default(1),
+  page: z.number().int().min(1).max(50).default(1),
 });
 
 export async function saveFieldsAction(
@@ -182,69 +215,222 @@ export async function updateContentAction(
 
 // ---------- Send for signature ----------
 
+const SIGNING_ORDERS = new Set(['sequential', 'parallel']);
+
 export async function sendForSignatureAction(
   documentId: string,
-  _prev: FormState & { link?: string },
+  _prev: FormState & { links?: { name: string; link: string }[] },
   formData: FormData,
-): Promise<FormState & { link?: string }> {
+): Promise<FormState & { links?: { name: string; link: string }[] }> {
   const user = await requireUser();
   const doc = await db.document.findFirst({
     where: { id: documentId, ownerId: user.id },
-    include: { fields: true, signer: true },
+    include: { fields: true },
   });
   if (!doc) return { error: 'Document not found' };
+  if (doc.status !== 'DRAFT') return { error: 'This document was already sent.' };
   if (doc.fields.length === 0) return { error: 'Place at least one field before sending.' };
 
-  const name = String(formData.get('name') ?? '').trim();
-  const email = String(formData.get('email') ?? '').trim().toLowerCase();
-  const message = String(formData.get('message') ?? '').trim();
-  if (name.length < 2) return { error: 'Enter the signer’s name.' };
-  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: 'Enter a valid email.' };
+  // Firmantes: filas paralelas name[]/email[] en orden = slot 1..N
+  const names = formData.getAll('signerName').map((v) => String(v).trim());
+  const emails = formData.getAll('signerEmail').map((v) => String(v).trim().toLowerCase());
+  const signers = names
+    .map((name, i) => ({ name, email: emails[i] ?? '', slot: i + 1 }))
+    .filter((sg) => sg.name || sg.email);
+  if (signers.length === 0) return { error: 'Add at least one signer.' };
+  if (signers.length > 5) return { error: 'Up to 5 signers per document.' };
+  for (const sg of signers) {
+    if (sg.name.length < 2) return { error: `Enter a name for signer ${sg.slot}.` };
+    if (!/^\S+@\S+\.\S+$/.test(sg.email)) return { error: `Enter a valid email for signer ${sg.slot}.` };
+  }
+  if (new Set(signers.map((sg) => sg.email)).size !== signers.length) {
+    return { error: 'Each signer needs a different email.' };
+  }
 
-  const token = doc.signer?.token ?? mkToken();
+  // Los campos deben apuntar a slots existentes
+  const maxSlot = signers.length;
+  if (doc.fields.some((f) => f.slot > maxSlot)) {
+    return { error: `Some fields are assigned to signer ${Math.max(...doc.fields.map((f) => f.slot))}, but you only added ${maxSlot}.` };
+  }
+
+  const signingOrder = SIGNING_ORDERS.has(String(formData.get('signingOrder')))
+    ? String(formData.get('signingOrder'))
+    : 'sequential';
+  const message = String(formData.get('message') ?? '').trim();
+  const expiresDays = Math.min(Math.max(Number(formData.get('expiresDays') ?? 30) || 30, 1), 365);
+  const expiresAt = new Date(Date.now() + expiresDays * 24 * 3600e3);
+
   const contentHash = createHash('sha256')
     .update(doc.sourceType === 'pdf' ? doc.pdfPath ?? '' : doc.content)
     .digest('hex');
-  await db.$transaction([
-    db.signer.upsert({
-      where: { documentId },
-      create: { documentId, name, email, token, message: message || null, sentAt: new Date() },
-      update: { name, email, message: message || null, sentAt: new Date() },
-    }),
-    db.document.update({ where: { id: documentId }, data: { status: 'SENT', contentHash } }),
-    db.event.create({
-      data: { documentId, type: 'sent', detail: `Sent to ${name} (${email})` },
-    }),
-  ]);
-  // Note: detail and dashboard pages are force-dynamic, so no revalidation is
-  // needed here — and revalidating /documents/[id] would also re-render the
-  // /prepare child route, which redirects away and would unmount the modal.
-  return { link: `/sign/${token}` };
+
+  const created = await db.$transaction(async (tx) => {
+    await tx.signer.deleteMany({ where: { documentId } });
+    const rows = [];
+    for (const sg of signers) {
+      rows.push(
+        await tx.signer.create({
+          data: {
+            documentId,
+            slot: sg.slot,
+            name: sg.name,
+            email: sg.email,
+            token: mkToken(),
+            message: message || null,
+            sentAt: new Date(),
+          },
+        }),
+      );
+    }
+    await tx.document.update({
+      where: { id: documentId },
+      data: { status: 'SENT', signingOrder, expiresAt, contentHash },
+    });
+    await tx.event.create({
+      data: {
+        documentId,
+        type: 'sent',
+        detail: `Sent to ${signers.map((sg) => sg.name).join(', ')} (${signingOrder}, expires in ${expiresDays}d)`,
+      },
+    });
+    // Directorio de contactos: upsert por email
+    for (const sg of signers) {
+      await tx.contact.upsert({
+        where: { ownerId_email: { ownerId: user.id, email: sg.email } },
+        create: { ownerId: user.id, name: sg.name, email: sg.email },
+        update: { name: sg.name },
+      });
+    }
+    return rows;
+  });
+
+  // Invitaciones: secuencial → solo slot 1; paralelo → todos
+  const toInvite = signingOrder === 'sequential' ? created.filter((sg) => sg.slot === 1) : created;
+  for (const sg of toInvite) {
+    await mail.invite(sg.email, sg.name, doc.title, user.name, sg.token, message || null);
+  }
+
+  return { links: created.map((sg) => ({ name: sg.name, link: `/sign/${sg.token}` })) };
 }
 
-export async function sendReminderAction(documentId: string): Promise<{ ok: boolean }> {
+export async function sendReminderAction(documentId: string, signerId?: string): Promise<{ ok: boolean }> {
   const user = await requireUser();
   const doc = await db.document.findFirst({
     where: { id: documentId, ownerId: user.id },
-    include: { signer: true },
+    include: { signers: true },
   });
-  if (!doc?.signer) return { ok: false };
-  await db.event.create({
-    data: { documentId, type: 'reminder', detail: `Reminder sent to ${doc.signer.name}` },
-  });
+  if (!doc) return { ok: false };
+  const pending = doc.signers.filter((sg) => !sg.signedAt && !sg.declinedAt);
+  const targets = signerId ? pending.filter((sg) => sg.id === signerId) : pending;
+  if (targets.length === 0) return { ok: false };
+  for (const sg of targets) {
+    await mail.reminder(sg.email, sg.name, doc.title, user.name, sg.token);
+    await db.event.create({
+      data: { documentId, type: 'reminder', detail: `Reminder emailed to ${sg.name}` },
+    });
+  }
   revalidatePath(`/documents/${documentId}`);
   return { ok: true };
 }
 
-// ============================== SIGNER (public, by token) ==============================
+// ---------- Lifecycle: void, duplicate, resend ----------
+
+const OPEN_STATUSES = ['SENT', 'PARTIALLY_SIGNED'];
+
+export async function voidDocumentAction(documentId: string): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const doc = await db.document.findFirst({
+    where: { id: documentId, ownerId: user.id },
+    include: { signers: true },
+  });
+  if (!doc) return { ok: false, error: 'Not found' };
+  if (!OPEN_STATUSES.includes(doc.status)) return { ok: false, error: 'Only in-progress documents can be voided.' };
+
+  await db.$transaction([
+    db.document.update({ where: { id: documentId }, data: { status: 'VOIDED' } }),
+    db.event.create({ data: { documentId, type: 'voided', detail: `Voided by ${user.name}` } }),
+  ]);
+  for (const sg of doc.signers.filter((x) => !x.signedAt && !x.declinedAt)) {
+    await mail.voided(sg.email, sg.name, doc.title, user.name);
+  }
+  revalidatePath(`/documents/${documentId}`);
+  revalidatePath('/dashboard');
+  return { ok: true };
+}
+
+export async function duplicateDocumentAction(documentId: string): Promise<void> {
+  const user = await requireUser();
+  const doc = await db.document.findFirst({
+    where: { id: documentId, ownerId: user.id },
+    include: { fields: true },
+  });
+  if (!doc) redirect('/dashboard');
+  const copy = await db.document.create({
+    data: {
+      ownerId: user.id,
+      title: `${doc.title} (copy)`,
+      content: doc.content,
+      sourceType: doc.sourceType,
+      pdfPath: doc.pdfPath,
+      status: 'DRAFT',
+      fields: {
+        create: doc.fields.map((f) => ({
+          type: f.type, x: f.x, y: f.y, w: f.w, h: f.h,
+          required: f.required, slot: f.slot, page: f.page,
+        })),
+      },
+      events: { create: [{ type: 'created', detail: `Duplicated from "${doc.title}"` }] },
+    },
+  });
+  redirect(`/documents/${copy.id}`);
+}
+
+/** Regenera el token de un firmante pendiente (link viejo muere) y reenvía la invitación. */
+export async function resendLinkAction(documentId: string, signerId: string): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const doc = await db.document.findFirst({
+    where: { id: documentId, ownerId: user.id },
+    include: { signers: true },
+  });
+  if (!doc) return { ok: false, error: 'Not found' };
+  const signer = doc.signers.find((sg) => sg.id === signerId);
+  if (!signer || signer.signedAt) return { ok: false, error: 'This signer already signed.' };
+
+  const token = mkToken();
+  await db.$transaction([
+    db.signer.update({
+      where: { id: signerId },
+      data: { token, sentAt: new Date(), declinedAt: null, declineNote: null },
+    }),
+    db.event.create({
+      data: { documentId, type: 'sent', detail: `New signing link issued for ${signer.name}` },
+    }),
+  ]);
+  await mail.invite(signer.email, signer.name, doc.title, user.name, token, signer.message);
+  revalidatePath(`/documents/${documentId}`);
+  return { ok: true };
+}
+
+/** Marca EXPIRED (lazy) los documentos abiertos vencidos; devuelve el estado real. */
+export async function ensureNotExpired(doc: { id: string; status: string; expiresAt: Date | null }): Promise<string> {
+  if (OPEN_STATUSES.includes(doc.status) && doc.expiresAt && doc.expiresAt < new Date()) {
+    await db.$transaction([
+      db.document.update({ where: { id: doc.id }, data: { status: 'EXPIRED' } }),
+      db.event.create({ data: { documentId: doc.id, type: 'expired', detail: 'Signing window expired' } }),
+    ]);
+    return 'EXPIRED';
+  }
+  return doc.status;
+}
+
+// ============================== SIGNER (public, by token) ==============================// ============================== SIGNER (public, by token) ==============================
 
 export async function markViewedAction(token: string): Promise<void> {
-  const signer = await db.signer.findUnique({ where: { token }, include: { document: true } });
+  const signer = await db.signer.findUnique({ where: { token } });
   if (!signer || signer.viewedAt || signer.signedAt || signer.declinedAt) return;
   const { ip, ua } = await requestEvidence();
   await db.$transaction([
     db.signer.update({ where: { id: signer.id }, data: { viewedAt: new Date(), viewedIp: ip, viewedUa: ua } }),
-    db.document.update({ where: { id: signer.documentId }, data: { status: 'VIEWED' } }),
     db.event.create({
       data: { documentId: signer.documentId, type: 'viewed', detail: `${signer.name} opened the document` },
     }),
@@ -260,37 +446,84 @@ export async function submitSignatureAction(
 ): Promise<{ ok: boolean; error?: string }> {
   const signer = await db.signer.findUnique({
     where: { token },
-    include: { document: { include: { fields: true } } },
+    include: {
+      document: { include: { fields: true, signers: true, owner: { select: { name: true, email: true } } } },
+    },
   });
   if (!signer) return { ok: false, error: 'Invalid link' };
   if (signer.signedAt) return { ok: false, error: 'Already signed' };
   if (signer.declinedAt) return { ok: false, error: 'This document was declined' };
 
+  const doc = signer.document;
+  const status = await ensureNotExpired(doc);
+  if (status === 'EXPIRED') return { ok: false, error: 'This signing link has expired.' };
+  if (!['SENT', 'PARTIALLY_SIGNED'].includes(status)) {
+    return { ok: false, error: 'This document is no longer open for signing.' };
+  }
+
+  // Turno secuencial: solo puede firmar el slot activo (el menor sin firmar)
+  if (doc.signingOrder === 'sequential') {
+    const activeSlot = Math.min(
+      ...doc.signers.filter((sg) => !sg.signedAt && !sg.declinedAt).map((sg) => sg.slot),
+    );
+    if (signer.slot !== activeSlot) {
+      return { ok: false, error: 'It is not your turn to sign yet.' };
+    }
+  }
+
   const parsed = SubmitSchema.safeParse(values);
   if (!parsed.success) return { ok: false, error: 'Invalid submission' };
 
-  const required = signer.document.fields.filter((f) => f.required);
-  for (const f of required) {
+  // Solo los campos de SU slot
+  const myFields = doc.fields.filter((f) => f.slot === signer.slot);
+  for (const f of myFields.filter((f) => f.required)) {
     if (!parsed.data[f.id]) return { ok: false, error: 'Complete all required fields.' };
   }
 
+  const others = doc.signers.filter((sg) => sg.id !== signer.id);
+  const allSigned = others.every((sg) => sg.signedAt) /* los demás */;
+  const nextStatus = allSigned ? 'SIGNED' : 'PARTIALLY_SIGNED';
+
   const { ip, ua } = await requestEvidence();
   await db.$transaction([
-    ...signer.document.fields
+    ...myFields
       .filter((f) => parsed.data[f.id] !== undefined)
       .map((f) => db.field.update({ where: { id: f.id }, data: { value: parsed.data[f.id] } })),
     db.signer.update({ where: { id: signer.id }, data: { signedAt: new Date(), signedIp: ip, signedUa: ua } }),
-    db.document.update({ where: { id: signer.documentId }, data: { status: 'SIGNED' } }),
+    db.document.update({ where: { id: doc.id }, data: { status: nextStatus } }),
     db.event.create({
-      data: { documentId: signer.documentId, type: 'signed', detail: `${signer.name} signed the document` },
+      data: { documentId: doc.id, type: 'signed', detail: `${signer.name} signed (${signer.slot}/${doc.signers.length})` },
     }),
   ]);
+
+  if (allSigned) {
+    // Documento completo: avisar a dueño y a todos los firmantes
+    await mail.completed(doc.owner.email, doc.title, doc.id);
+    for (const sg of doc.signers) {
+      await mail.completed(sg.email, doc.title, doc.id);
+    }
+    await db.event.create({ data: { documentId: doc.id, type: 'completed', detail: 'All parties signed' } });
+  } else if (doc.signingOrder === 'sequential') {
+    // Invitar al siguiente en el orden
+    const remaining = others.filter((sg) => !sg.signedAt && !sg.declinedAt);
+    if (remaining.length > 0) {
+      const next = remaining.reduce((a, b) => (a.slot < b.slot ? a : b));
+      await mail.invite(next.email, next.name, doc.title, doc.owner.name, next.token, next.message);
+      await db.event.create({
+        data: { documentId: doc.id, type: 'sent', detail: `Invitation sent to next signer: ${next.name}` },
+      });
+    }
+  }
+
   revalidatePath('/dashboard');
   return { ok: true };
 }
 
 export async function declineAction(token: string, note: string): Promise<{ ok: boolean }> {
-  const signer = await db.signer.findUnique({ where: { token } });
+  const signer = await db.signer.findUnique({
+    where: { token },
+    include: { document: { include: { owner: { select: { email: true } } } } },
+  });
   if (!signer || signer.signedAt || signer.declinedAt) return { ok: false };
   await db.$transaction([
     db.signer.update({
@@ -302,15 +535,52 @@ export async function declineAction(token: string, note: string): Promise<{ ok: 
       data: {
         documentId: signer.documentId,
         type: 'declined',
-        detail: `${signer.name} declined${note ? ` — “${note.slice(0, 120)}”` : ''}`,
+        detail: `${signer.name} declined${note ? ` — \u201C${note.slice(0, 120)}\u201D` : ''}`,
       },
     }),
   ]);
+  await mail.declined(signer.document.owner.email, signer.document.title, signer.name, note || null);
   revalidatePath('/dashboard');
   return { ok: true };
 }
 
-// ============================== TEMPLATES ==============================
+// ============================== CONTACTS ==============================
+
+export async function upsertContactAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState & { ok?: boolean }> {
+  const user = await requireUser();
+  const id = String(formData.get('id') ?? '');
+  const name = String(formData.get('name') ?? '').trim();
+  const email = String(formData.get('email') ?? '').trim().toLowerCase();
+  const notes = String(formData.get('notes') ?? '').trim();
+  if (name.length < 2) return { error: 'Enter a name.' };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: 'Enter a valid email.' };
+
+  if (id) {
+    await db.contact.updateMany({
+      where: { id, ownerId: user.id },
+      data: { name, email, notes: notes || null },
+    });
+  } else {
+    const exists = await db.contact.findUnique({
+      where: { ownerId_email: { ownerId: user.id, email } },
+    });
+    if (exists) return { error: 'You already have a contact with that email.' };
+    await db.contact.create({ data: { ownerId: user.id, name, email, notes: notes || null } });
+  }
+  revalidatePath('/clients');
+  return { ok: true };
+}
+
+export async function deleteContactAction(id: string): Promise<void> {
+  const user = await requireUser();
+  await db.contact.deleteMany({ where: { id, ownerId: user.id } });
+  revalidatePath('/clients');
+}
+
+// ============================== TEMPLATES ==============================// ============================== TEMPLATES ==============================
 
 export async function createTemplateAction(
   _prev: FormState,

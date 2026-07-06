@@ -58,7 +58,7 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
     where: { id: documentId },
     include: {
       fields: true,
-      signer: true,
+      signers: { orderBy: { slot: 'asc' } },
       owner: { select: { name: true, email: true } },
       events: { orderBy: { createdAt: 'asc' } },
     },
@@ -141,11 +141,14 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
     });
   }
 
-  // ---------- Draw completed fields on page 1 (coords are % of the page) ----------
-  const pw = firstPage.getWidth();
-  const ph = firstPage.getHeight();
+  // ---------- Draw completed fields on their page (coords are % of that page) ----------
+  const contentPages = pdf.getPages();
 
   for (const f of doc.fields) {
+    // Página del campo (1-based, acotada a las páginas del contrato)
+    const target = contentPages[Math.min(Math.max(f.page, 1), contentPages.length) - 1]!;
+    const pw = target.getWidth();
+    const ph = target.getHeight();
     const x = (f.x / 100) * pw;
     const wBox = (f.w / 100) * pw;
     const hBox = (f.h / 100) * ph;
@@ -166,12 +169,12 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
         const scale = Math.min(wBox / png.width, hBox / png.height);
         const w = png.width * scale;
         const h = png.height * scale;
-        firstPage.drawImage(png, { x: x + (wBox - w) / 2, y: yBox + (hBox - h) / 2, width: w, height: h });
+        target.drawImage(png, { x: x + (wBox - w) / 2, y: yBox + (hBox - h) / 2, width: w, height: h });
       } else if (sig?.kind === 'typed' && sig.text) {
         const font = await getScriptFont(sig.font);
         let size = hBox * 0.62;
         while (size > 8 && font.widthOfTextAtSize(sig.text, size) > wBox * 0.94) size -= 1;
-        firstPage.drawText(sig.text, {
+        target.drawText(sig.text, {
           x: x + (wBox - font.widthOfTextAtSize(sig.text, size)) / 2,
           y: yBox + hBox / 2 - size * 0.36,
           size,
@@ -180,16 +183,16 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
         });
       }
       // Signature baseline
-      firstPage.drawLine({
+      target.drawLine({
         start: { x: x + 2, y: yBox + 2 },
         end: { x: x + wBox - 2, y: yBox + 2 },
         thickness: 0.7,
         color: LIGHT,
       });
     } else if (f.type === 'checkbox') {
-      firstPage.drawRectangle({ x, y: yBox, width: wBox, height: hBox, borderColor: GRAY, borderWidth: 1 });
+      target.drawRectangle({ x, y: yBox, width: wBox, height: hBox, borderColor: GRAY, borderWidth: 1 });
       const size = Math.min(wBox, hBox) * 0.72;
-      firstPage.drawText('X', {
+      target.drawText('X', {
         x: x + wBox / 2 - interBold.widthOfTextAtSize('X', size) / 2,
         y: yBox + hBox / 2 - size * 0.36,
         size,
@@ -199,7 +202,7 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
     } else {
       let size = Math.min(hBox * 0.5, 11);
       while (size > 6 && inter.widthOfTextAtSize(f.value, size) > wBox * 0.95) size -= 0.5;
-      firstPage.drawText(f.value, {
+      target.drawText(f.value, {
         x: x + 4,
         y: yBox + hBox / 2 - size * 0.36,
         size,
@@ -242,14 +245,16 @@ export async function generateSignedPdf(documentId: string): Promise<Uint8Array>
   row('Document ID', doc.id);
   row('Status', doc.status, { color: doc.status === 'SIGNED' ? GREEN : INK });
   row('Sender', `${doc.owner.name} <${doc.owner.email}>`);
-  if (doc.signer) {
-    row('Signer', `${doc.signer.name} <${doc.signer.email}>`);
-    row('Sent', fmt(doc.signer.sentAt));
-    row('Viewed', `${fmt(doc.signer.viewedAt)}${doc.signer.viewedIp ? `  ·  IP ${doc.signer.viewedIp}` : ''}`);
-    row('Signed', `${fmt(doc.signer.signedAt)}${doc.signer.signedIp ? `  ·  IP ${doc.signer.signedIp}` : ''}`);
-    if (doc.signer.signedUa) row('Device', doc.signer.signedUa.slice(0, 160));
+  row('Signing order', doc.signingOrder === 'sequential' ? 'Sequential (in order)' : 'Parallel (any order)');
+  for (const sg of doc.signers) {
+    row(`Signer ${sg.slot}`, `${sg.name} <${sg.email}>`, { bold: true });
+    row('  Sent', fmt(sg.sentAt));
+    row('  Viewed', `${fmt(sg.viewedAt)}${sg.viewedIp ? `  ·  IP ${sg.viewedIp}` : ''}`);
+    row('  Signed', `${fmt(sg.signedAt)}${sg.signedIp ? `  ·  IP ${sg.signedIp}` : ''}`);
+    if (sg.signedUa) row('  Device', sg.signedUa.slice(0, 120));
   }
   if (doc.contentHash) row('SHA-256', doc.contentHash);
+  row('Verify online', `${process.env.APP_URL ?? 'http://localhost:3010'}/verify/${doc.id}`);
 
   cy -= 8;
   cert.drawText('AUDIT TRAIL', { x: MARGIN_X, y: cy, size: 8, font: interBold, color: LIGHT });
